@@ -32,20 +32,22 @@ const getFirebaseConfigValue = (key: keyof typeof USER_FIREBASE_CONFIG, envVal: 
 };
 
 const firebaseConfig = {
-  apiKey: getFirebaseConfigValue("apiKey", import.meta.env.VITE_FIREBASE_API_KEY, firebaseConfigFile.apiKey),
-  authDomain: getFirebaseConfigValue("authDomain", import.meta.env.VITE_FIREBASE_AUTH_DOMAIN, firebaseConfigFile.authDomain),
-  projectId: getFirebaseConfigValue("projectId", import.meta.env.VITE_FIREBASE_PROJECT_ID, firebaseConfigFile.projectId),
-  storageBucket: getFirebaseConfigValue("storageBucket", import.meta.env.VITE_FIREBASE_STORAGE_BUCKET, firebaseConfigFile.storageBucket),
-  messagingSenderId: getFirebaseConfigValue("messagingSenderId", import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID, firebaseConfigFile.messagingSenderId),
-  appId: getFirebaseConfigValue("appId", import.meta.env.VITE_FIREBASE_APP_ID, firebaseConfigFile.appId)
+  apiKey: getFirebaseConfigValue("apiKey", import.meta.env.VITE_FIR_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY, firebaseConfigFile.apiKey),
+  authDomain: getFirebaseConfigValue("authDomain", import.meta.env.VITE_FIR__DOMAIN || import.meta.env.VITE_FIREBASE_AUTH_DOMAIN, firebaseConfigFile.authDomain),
+  projectId: getFirebaseConfigValue("projectId", import.meta.env.VITE_FIR__JECT_ID || import.meta.env.VITE_FIREBASE_PROJECT_ID, firebaseConfigFile.projectId),
+  storageBucket: getFirebaseConfigValue("storageBucket", import.meta.env.VITE_FIR__BUCKET || import.meta.env.VITE_FIREBASE_STORAGE_BUCKET, firebaseConfigFile.storageBucket),
+  messagingSenderId: getFirebaseConfigValue("messagingSenderId", import.meta.env.VITE_FIR_NDER_ID || import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID, firebaseConfigFile.messagingSenderId),
+  appId: getFirebaseConfigValue("appId", import.meta.env.VITE_FIR__APP_ID || import.meta.env.VITE_FIREBASE_APP_ID, firebaseConfigFile.appId)
 };
 
+// Cloud Firestore configuration does not require databaseURL.
+// Only fetch firestoreDatabaseId if it doesn't contain a http/rtdb URL.
 const rawDatabaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || firebaseConfigFile.firestoreDatabaseId || "";
 const firestoreDatabaseId = (rawDatabaseId && !rawDatabaseId.includes('http') && !rawDatabaseId.includes('firebaseio.com') && !rawDatabaseId.includes('remixed'))
   ? rawDatabaseId 
   : "";
 
-const measurementId = import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || firebaseConfigFile.measurementId || "G-KCWDEZV7NX";
+const measurementId = import.meta.env.VITE_FIR_MENT_ID || import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || firebaseConfigFile.measurementId || "G-KCWDEZV7NX";
 
 export const isFirebasePlaceholder = 
   !firebaseConfig.projectId || 
