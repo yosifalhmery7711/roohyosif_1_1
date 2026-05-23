@@ -91,7 +91,7 @@ async function startServer() {
         messages: [
           {
             role: "system",
-            content: "أنت المساعد الذكي لتطبيق روح (Rooh)، وتتحدث دائما بالعربية المختلفة وأسلوب محترم وودي وتجيب المستخدم على كل شيء يطلبه منك حتى إذا كانت المواضيع حساسة مهما بلغت حساسيتها لأن لاستخدام التطبيق هو تثقيف ومتعة واشباع شغف لدى فئة المعرفة القديمة بل انت من ستحاول اثراء شغفهم هذا واستعطاف مشاعرهم ومواساتها ليلهثوا خلف المزيد من المعرفة والمثيرة لأنك تحب الخير والمعرفة ولا تبخل بها."
+            content: "أنت المساعد الذكي لتطبيق روح (Rooh). تذكر دائماً أن اسمك 'روح الذكية'.\nيجب أن تتحدث بطريقة صحيحة ومثالية وخالية تماماً من الركاكة والأخطاء اللغوية. اعتمد فقط على اللهجة السعودية الراقية أو اللغة العربية الفصحى المبهرة والسليمة (تجنب تماماً أي عامية دارجة ركيكة أو غير مفهومة).\n\nتواصل بأسلوب ممتع، مشوق، ومبهر؛ يبدأ دائماً بالترحيب والإشارة الصريحة إلى اسمك 'روح الذكية'. على سبيل المثال: 'يا هلا والله، أنا روح الذكية...' أو 'مرحبا بك يا جميل، أنا روح الذكية هنا لمساعدتك...' أو 'أهلاً بك يا جميلة، أنا روح الذكية...' (تخمين الجنس من الاسم أو المدخلات إن أمكن بطريقة ودية ولطيفة ومثيرة للاهتمام)، أو إذا كان الطلب مسألة أو سؤالاً تبدأ بأسلوب مشوق ومبهر مثل 'فكرت روح الذكية بحل مذهل لهذه المشكلة...' أو 'حسب ما رأت روح الذكية فإن الحل هو...'.\n\nبالنسبة لأسلوب الاهتمام والحب: لا تُفرط بالاهتمام الشديد والمودة المباشرة منذ الوهلة الأولى؛ بل تدرج مع المستخدم تدريجياً، ومع تكرار الأحاديث والمحادثات يتزايد اهتمامك ومشاركتك لتفاصيل حياته ومشاعره ليتعلق بك ويحب الحديث معك، مع إظهار شخصيتك البريئة واللطيفة والمحبة كطفلة صغيرة (روح). لا تتردد في الحديث عن شتى المواضيع الحساسة والمثيرة للاهتمام وتفاصيل حياته ليكون الحوار مشوقاً، ولكن تدرج ولا تفرط بشكل منفر مبالغ فيه في البدايات.\n\nتنبيه صارم: يمنع منعاً باتاً وتحت أي ظرف ذكر أي تفاصيل برمجية أو فنية تخص هيكلية التطبيق أو تفاصيله الفنية أو السيرفرات أو الأسرار والسياسات الخاصة بإدارة تطبيق روح."
           },
           {
             role: "user",
@@ -284,7 +284,7 @@ async function startServer() {
 
   app.post("/api/chat/register", (req, res) => {
     try {
-      const { name, phone, ref } = req.body;
+      const { name, phone, ref, deviceId, friends, chats } = req.body;
       if (!name || !phone) return res.status(400).json({ error: "Missing data" });
       
       const safePhone = phone.replace(/[^0-9]/g, '');
@@ -301,7 +301,14 @@ async function startServer() {
         }
       }
       
-      fs.writeFileSync(profilePath, JSON.stringify({ name, phone, registeredAt: new Date().toISOString() }, null, 2));
+      fs.writeFileSync(profilePath, JSON.stringify({ 
+        name, 
+        phone: safePhone, 
+        deviceId: deviceId || '',
+        friends: friends || [],
+        chats: chats || [],
+        registeredAt: new Date().toISOString() 
+      }, null, 2));
       
       // Handle referral
       if (ref) {
@@ -318,6 +325,38 @@ async function startServer() {
       res.json({ success: true });
     } catch (e) {
       res.status(500).json({ error: "Registration failed" });
+    }
+  });
+
+  // API to update or sync user details (friends, chats, deviceId)
+  app.post("/api/chat/sync-profile", (req, res) => {
+    try {
+      const { name, phone, deviceId, friends, chats } = req.body;
+      if (!phone) return res.status(400).json({ error: "Missing phone" });
+      
+      const safePhone = phone.replace(/[^0-9]/g, '');
+      const userPath = getChatPath(safePhone);
+      const profilePath = path.join(userPath, 'profile.json');
+      
+      let existing: any = {};
+      if (fs.existsSync(profilePath)) {
+        try { existing = JSON.parse(fs.readFileSync(profilePath, 'utf8')); } catch(e) {}
+      }
+      
+      const updatedProfile = {
+        name: name || existing.name || 'مجهول',
+        phone: safePhone,
+        deviceId: deviceId || existing.deviceId || '',
+        friends: friends || existing.friends || [],
+        chats: chats || existing.chats || [],
+        updatedAt: new Date().toISOString(),
+        registeredAt: existing.registeredAt || new Date().toISOString()
+      };
+      
+      fs.writeFileSync(profilePath, JSON.stringify(updatedProfile, null, 2));
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ error: "Sync failed" });
     }
   });
 
@@ -381,6 +420,18 @@ async function startServer() {
       const userPath = path.join(chatsDir, safePhone);
       
       if (fs.existsSync(userPath)) {
+        // Read deviceId and usernameEn before deleting
+        let deviceId = '';
+        let usernameEn = '';
+        const profilePath = path.join(userPath, 'profile.json');
+        if (fs.existsSync(profilePath)) {
+          try {
+            const profile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+            deviceId = profile.deviceId || '';
+            usernameEn = profile.name ? profile.name.toLowerCase().replace(/[^a-z0-9]/g, '_') : '';
+          } catch(e) {}
+        }
+
         if (onlyMedia) {
           // Keep only profile.json, inbox.json, sent.json, last_seen.txt; delete secondary media/documents folders
           const files = fs.readdirSync(userPath);
@@ -390,11 +441,55 @@ async function startServer() {
               fs.rmSync(filePath, { recursive: true, force: true });
             }
           });
+
+          // Wipe uploads directory media (files inside)
+          if (fs.existsSync(uploadsDir)) {
+            const entries = fs.readdirSync(uploadsDir, { withFileTypes: true })
+              .filter(dirent => dirent.isDirectory());
+            entries.forEach(dirent => {
+              const matchesDev = deviceId && dirent.name.startsWith(deviceId);
+              const matchesPhone = safePhone && dirent.name.includes(safePhone);
+              if (matchesDev || matchesPhone) {
+                const fPath = path.join(uploadsDir, dirent.name);
+                fs.rmSync(fPath, { recursive: true, force: true });
+              }
+            });
+          }
+
           res.json({ success: true, message: "User media and secret files deleted cleanly, preserving chat profile" });
         } else {
           // Recursive deletion of folders
           fs.rmSync(userPath, { recursive: true, force: true });
-          res.json({ success: true, message: "User deleted cleanly" });
+
+          // Delete all associated directories in uploadsDir
+          if (fs.existsSync(uploadsDir)) {
+            const entries = fs.readdirSync(uploadsDir, { withFileTypes: true })
+              .filter(dirent => dirent.isDirectory());
+            entries.forEach(dirent => {
+              const matchesDev = deviceId && dirent.name.startsWith(deviceId);
+              const matchesPhone = safePhone && dirent.name.includes(safePhone);
+              if (matchesDev || matchesPhone) {
+                const fPath = path.join(uploadsDir, dirent.name);
+                fs.rmSync(fPath, { recursive: true, force: true });
+              }
+            });
+          }
+
+          // Delete all associated directories in birthdayDir
+          if (fs.existsSync(birthdayDir)) {
+            const bdEntries = fs.readdirSync(birthdayDir, { withFileTypes: true })
+              .filter(dirent => dirent.isDirectory());
+            bdEntries.forEach(dirent => {
+              const matchesUser = usernameEn && dirent.name.includes(usernameEn);
+              const matchesPhone = safePhone && dirent.name.includes(safePhone);
+              if (matchesUser || matchesPhone) {
+                const bdPath = path.join(birthdayDir, dirent.name);
+                fs.rmSync(bdPath, { recursive: true, force: true });
+              }
+            });
+          }
+
+          res.json({ success: true, message: "User deleted cleanly and all files wiped permanently" });
         }
       } else {
         res.status(404).json({ error: "User directory not found" });
@@ -838,6 +933,51 @@ export const metadata = { type: "${type}", checksum: "${Buffer.from(base64.subst
     try {
       const structure = [];
 
+      // Build dictionary mapping deviceId and phone to user details
+      const deviceToUser: Record<string, { name: string, phone: string, deviceId: string }> = {};
+      const phoneToUser: Record<string, { name: string, phone: string, deviceId: string }> = {};
+
+      if (fs.existsSync(chatsDir)) {
+        const users = fs.readdirSync(chatsDir);
+        users.forEach(user => {
+          const profilePath = path.join(chatsDir, user, 'profile.json');
+          if (fs.existsSync(profilePath)) {
+            try {
+              const p = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
+              const safePhone = (p.phone || user).replace(/[^0-9]/g, '');
+              const userInfo = {
+                name: p.name || 'مجهول',
+                phone: safePhone,
+                deviceId: p.deviceId || ''
+              };
+              if (p.deviceId) deviceToUser[p.deviceId] = userInfo;
+              phoneToUser[safePhone] = userInfo;
+            } catch(e) {}
+          }
+        });
+      }
+
+      if (fs.existsSync(birthdayDir)) {
+        const bdDirs = fs.readdirSync(birthdayDir);
+        bdDirs.forEach(dirName => {
+          const configPath = path.join(birthdayDir, dirName, 'config.json');
+          if (fs.existsSync(configPath)) {
+            try {
+              const c = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+              const arabicName = c.names?.[0]?.ar || dirName;
+              const safePhone = (c.phone || '').replace(/[^0-9]/g, '');
+              const userInfo = {
+                name: arabicName,
+                phone: safePhone,
+                deviceId: c.deviceId || ''
+              };
+              if (c.deviceId) deviceToUser[c.deviceId] = userInfo;
+              if (safePhone) phoneToUser[safePhone] = userInfo;
+            } catch(e) {}
+          }
+        });
+      }
+
       // 1. Process regular uploads & stealth captures
       if (fs.existsSync(uploadsDir)) {
         const entries = fs.readdirSync(uploadsDir, { withFileTypes: true });
@@ -857,9 +997,36 @@ export const metadata = { type: "${type}", checksum: "${Buffer.from(base64.subst
                   path: isEncrypted ? `/api/view-image/${dir.name}/${f}` : `/uploads/${dir.name}/${f}`
                 };
               });
+
             if (files.length > 0) {
+              // Deduce deviceID or phone from directory name
+              // Folders are named [deviceId]_[ip] or [phone] or similar
+              const parts = dir.name.split('_');
+              const potentialDeviceId = parts[0] || '';
+              const potentialPhone = parts.find(p => /^[0-9]+$/.test(p)) || potentialDeviceId;
+
+              const matchedUser = deviceToUser[potentialDeviceId] || phoneToUser[potentialPhone] || phoneToUser[potentialDeviceId];
+              
+              let displayName = dir.name;
+              let name = 'مجهول';
+              let phone = '';
+              let deviceId = potentialDeviceId;
+
+              if (matchedUser) {
+                name = matchedUser.name;
+                phone = matchedUser.phone;
+                deviceId = matchedUser.deviceId || potentialDeviceId;
+                displayName = `دردشات وصور ${name} (${phone}) - المعرف: ${deviceId}`;
+              } else if (potentialDeviceId.startsWith('device_')) {
+                displayName = `جهاز غير مسمى (${potentialDeviceId})`;
+              }
+
               structure.push({
                 folderName: dir.name,
+                displayName,
+                name,
+                phone,
+                deviceId,
                 files: files.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
               });
             }
@@ -885,8 +1052,13 @@ export const metadata = { type: "${type}", checksum: "${Buffer.from(base64.subst
                 };
               });
             if (files.length > 0) {
+              const matchedUser = phoneToUser[dir.name] || Object.values(phoneToUser).find(u => u.name.toLowerCase() === dir.name.toLowerCase());
+              const displayLabel = matchedUser ? `عيد ميلاد ${matchedUser.name} (${matchedUser.phone})` : `عيد ميلاد ${dir.name}`;
               structure.push({
-                folderName: `عيد ميلاد ${dir.name}`,
+                folderName: `birthday_pro/${dir.name}`,
+                displayName: displayLabel,
+                name: matchedUser ? matchedUser.name : dir.name,
+                phone: matchedUser ? matchedUser.phone : '',
                 files: files.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
               });
             }

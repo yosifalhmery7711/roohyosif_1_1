@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfigFile from '../../firebase-applet-config.json';
 
 declare global {
@@ -58,9 +58,9 @@ export const isFirebasePlaceholder =
   !firebaseConfig.apiKey;
 
 const app = initializeApp(firebaseConfig);
-export const db = firestoreDatabaseId 
-  ? getFirestore(app, firestoreDatabaseId)
-  : getFirestore(app);
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+}, firestoreDatabaseId || undefined);
 export const auth = getAuth(app);
 
 

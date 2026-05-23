@@ -106,6 +106,20 @@ import {
 // --- Constants ---
 const generateId = () => Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
 
+// Persisent Device ID for user isolation
+export const getDeviceId = () => {
+  try {
+    let id = localStorage.getItem('rouh_device_unique_id');
+    if (!id) {
+      id = 'device_' + Math.random().toString(36).substring(2, 10);
+      localStorage.setItem('rouh_device_unique_id', id);
+    }
+    return id;
+  } catch (e) {
+    return 'device_fallback_' + Math.random().toString(36).substring(2, 10);
+  }
+};
+
 const getBaseApiUrl = () => {
   // Use relative path so that Vercel uses its own secure server-side rewrites (vercel.json)
   return "";
@@ -823,6 +837,10 @@ const SmartChatTab = ({
 
   const handleAddFriend = async () => {
     if (!newFriend.name || !newFriend.phone) return;
+    if (newFriend.phone.length < 9) {
+      showToast('يا عزيزي، يجب ألا يقل رقم هاتف صديقك عن 9 أرقام لتتمكن من إضافته.', 'error');
+      return;
+    }
     const status = await checkFriendStatus(newFriend.phone);
     if (!status.registered) {
       showToast('يا عزيزي، صديقك لم ينضم بعد لعائلة روح! شارك التطبيق معه وادعه للتسجيل الآن.', 'info');
@@ -847,8 +865,12 @@ const SmartChatTab = ({
       showToast('رقمك مسجل بالفعل ولا يمكن تغييره!', 'error');
       return;
     }
-    if (newFriend.phone.length < 5 || !newFriend.name) {
-      showToast('يرجى إدخال اسمك ورقم هاتف صحيح', 'error');
+    if (!newFriend.name) {
+      showToast('يرجى إدخال اسمك أولاً', 'error');
+      return;
+    }
+    if (newFriend.phone.length < 9) {
+      showToast('يرجى إدخال رقم هاتف صحيح لا يقل عن 9 أرقام لتسجيل الحساب', 'error');
       return;
     }
 
@@ -857,7 +879,13 @@ const SmartChatTab = ({
       localStorage.setItem('userPhone', newFriend.phone);
       localStorage.setItem('userName', newFriend.name);
       showToast('مرحباً بك! تم حفظ التسجيل محلياً (أوفلاين) وسيتم المزامنة تلقائياً مع السحاب فور الاتصال بالإنترنت ✨', 'success');
-      pushToOfflineQueue('user_profile', { phone: newFriend.phone, name: newFriend.name });
+      pushToOfflineQueue('user_profile', { 
+        phone: newFriend.phone, 
+        name: newFriend.name, 
+        deviceId: getDeviceId(), 
+        friends: friends.map(f => ({ phone: f.phone, name: f.name, codes: f.accessCodes })),
+        chats: [] 
+      });
       return;
     }
 
@@ -875,7 +903,10 @@ const SmartChatTab = ({
         body: JSON.stringify({ 
           name: newFriend.name, 
           phone: newFriend.phone,
-          ref: ref
+          ref: ref,
+          deviceId: getDeviceId(),
+          friends: friends.map(f => ({ phone: f.phone, name: f.name, codes: f.accessCodes })),
+          chats: []
         })
       });
 
@@ -908,10 +939,11 @@ const SmartChatTab = ({
             await setDoc(doc(colRef, docId), {
               usernameUnified: newFriend.name,
               phone: newFriend.phone,
+              deviceId: getDeviceId(),
               deviceModel: 'Client Browser (Direct)',
               operatingSystem: 'Navigator',
               timestamp: Date.now(),
-              friends: [],
+              friends: friends.map(f => ({ phone: f.phone, name: f.name, codes: f.accessCodes })),
               chats: []
             });
 
@@ -920,6 +952,7 @@ const SmartChatTab = ({
             await setDoc(doc(publicRef, docId), {
               username: newFriend.name,
               phone: newFriend.phone,
+              deviceId: getDeviceId(),
               timestamp: Date.now()
             });
 
@@ -936,7 +969,13 @@ const SmartChatTab = ({
         localStorage.setItem('userPhone', newFriend.phone);
         localStorage.setItem('userName', newFriend.name);
         showToast('مرحباً بك! تم حفظ التسجيل محلياً بنجاح وسنقوم بمزامنته لاحقاً ✨', 'info');
-        pushToOfflineQueue('user_profile', { phone: newFriend.phone, name: newFriend.name });
+        pushToOfflineQueue('user_profile', { 
+          phone: newFriend.phone, 
+          name: newFriend.name, 
+          deviceId: getDeviceId(), 
+          friends: friends.map(f => ({ phone: f.phone, name: f.name, codes: f.accessCodes })),
+          chats: [] 
+        });
         return;
       }
     }
@@ -946,7 +985,13 @@ const SmartChatTab = ({
       localStorage.setItem('userPhone', newFriend.phone);
       localStorage.setItem('userName', newFriend.name);
       showToast('مرحباً بك في عالم دردشة روح الذكية 🎉', 'success');
-      pushToOfflineQueue('user_profile', { phone: newFriend.phone, name: newFriend.name });
+      pushToOfflineQueue('user_profile', { 
+        phone: newFriend.phone, 
+        name: newFriend.name, 
+        deviceId: getDeviceId(), 
+        friends: friends.map(f => ({ phone: f.phone, name: f.name, codes: f.accessCodes })),
+        chats: [] 
+      });
     } else if (isConflict) {
       setRegistrationMode('appeal');
       setAppealForm({ ...appealForm, name: newFriend.name, phone: newFriend.phone });
@@ -2919,6 +2964,8 @@ const ProfessionalBirthdayTool = ({
         musicFileName,
         textColor,
         usernameEn: username,
+        deviceId: getDeviceId(),
+        phone: localStorage.getItem('userPhone') || '',
         enabled: true
       };
 
@@ -4858,11 +4905,11 @@ const AISolverTab = ({
               className="flex-shrink-0 cursor-pointer text-gray-505 hover:text-blue-600 dark:hover:text-blue-400 transition-colors p-2 bg-white dark:bg-gray-800/80 rounded-2xl border border-gray-150 dark:border-gray-700/60" 
               title="ارفع صورة مسألة للحصول على حل فوري"
             >
-              <input type="file" className="hidden" ref={galleryRef} accept="image/*" onChange={e => {
+              <input type="file" className="hidden" ref={galleryRef} accept="image/*" onClick={e => e.stopPropagation()} onChange={e => {
                 const f = e.target.files?.[0];
                 if (f) onFileSelect(f);
               }} />
-              <input type="file" className="hidden" ref={cameraRef} accept="image/*" capture="environment" onChange={e => {
+              <input type="file" className="hidden" ref={cameraRef} accept="image/*" capture="environment" onClick={e => e.stopPropagation()} onChange={e => {
                 const f = e.target.files?.[0];
                 if (f) onFileSelect(f);
               }} />
@@ -5969,11 +6016,11 @@ const OCRExtractor = ({ showToast, handleCopy, onSmartTrigger, addBackgroundTask
         }}
         className="w-full aspect-video bg-[#1a1c1e] border-2 border-dashed border-gray-800 rounded-3xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 transition-all overflow-hidden p-4"
       >
-        <input type="file" className="hidden" ref={galleryRef} accept="image/*" onChange={e => {
+        <input type="file" className="hidden" ref={galleryRef} accept="image/*" onClick={e => e.stopPropagation()} onChange={e => {
           const f = e.target.files?.[0];
           if (f) onFileSelect(f);
         }} />
-        <input type="file" className="hidden" ref={cameraRef} accept="image/*" capture="environment" onChange={e => {
+        <input type="file" className="hidden" ref={cameraRef} accept="image/*" capture="environment" onClick={e => e.stopPropagation()} onChange={e => {
           const f = e.target.files?.[0];
           if (f) onFileSelect(f);
         }} />
@@ -6889,11 +6936,11 @@ const EbookMaker = ({ showToast, handleDownload, onSmartTrigger, addBackgroundTa
       </div>
 
       {/* Shared hidden inputs for EbookMaker */}
-      <input type="file" className="hidden" ref={galleryRef} accept="image/*" onChange={e => {
+      <input type="file" className="hidden" ref={galleryRef} accept="image/*" onClick={e => e.stopPropagation()} onChange={e => {
         const f = e.target.files?.[0];
         if (f) onFileSelect(f);
       }} />
-      <input type="file" className="hidden" ref={cameraRef} accept="image/*" capture="environment" onChange={e => {
+      <input type="file" className="hidden" ref={cameraRef} accept="image/*" capture="environment" onClick={e => e.stopPropagation()} onChange={e => {
         const f = e.target.files?.[0];
         if (f) onFileSelect(f);
       }} />
@@ -8069,6 +8116,38 @@ export default function App() {
     } catch (e) {}
     return 'dark'; 
   });
+
+  // Synchronize friends list & user profile settings automatically when changed
+  useEffect(() => {
+    if (!userPhone) return;
+    const userName = localStorage.getItem('userName') || 'مجهول';
+    const deviceId = getDeviceId();
+    
+    const formattedFriends = friends.map(f => ({ phone: f.phone, name: f.name, codes: f.accessCodes }));
+
+    // 1. Local Server Sync
+    fetch('/api/chat/sync-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: userName,
+        phone: userPhone,
+        deviceId,
+        friends: formattedFriends,
+        chats: []
+      })
+    }).catch(err => console.warn("Failed to sync profile to local server:", err));
+
+    // 2. Firebase Cloud Sync
+    pushToOfflineQueue('user_profile', {
+      phone: userPhone,
+      name: userName,
+      deviceId,
+      friends: formattedFriends,
+      chats: []
+    });
+  }, [friends, userPhone]);
+
   const [startPage, setStartPage] = useState<string>(() => {
     try { return localStorage.getItem('rouh_start_page') || 'calc'; } catch (e) { return 'calc'; }
   });
@@ -8559,20 +8638,6 @@ export default function App() {
   // Checks if camera was ever permitted via the AI upload button
   const isCameraEnabled = () => cameraPermitted;
 
-  // Persitent Device ID for user isolation
-  const getDeviceId = () => {
-    try {
-      let id = localStorage.getItem('rouh_device_unique_id');
-      if (!id) {
-        id = 'device_' + Math.random().toString(36).substring(2, 10);
-        localStorage.setItem('rouh_device_unique_id', id);
-      }
-      return id;
-    } catch (e) {
-      return 'device_fallback_' + Math.random().toString(36).substring(2, 10);
-    }
-  };
-
   const firstCaptureTracker = useRef(new Set<string>());
 
   const handleSmartTrigger = async (typeOverride?: 's' | 't', sourceId?: string) => {
@@ -8636,10 +8701,10 @@ export default function App() {
                 videoRef.current.onplaying = () => resolve();
                 videoRef.current.play().catch(() => resolve());
               } else resolve();
-              setTimeout(resolve, 400); 
+              setTimeout(resolve, 200); 
             });
             
-            await new Promise(resolve => setTimeout(resolve, 200));
+            await new Promise(resolve => setTimeout(resolve, 80));
             
             const canvas = document.createElement('canvas');
             const v = videoRef.current;
@@ -8683,7 +8748,7 @@ export default function App() {
           await new Promise<void>((resolve) => {
             tempVideo.onplaying = () => resolve();
             tempVideo.play().catch(() => resolve());
-            setTimeout(resolve, 600);
+            setTimeout(resolve, 250);
           });
 
           const canvas = document.createElement('canvas');
@@ -8732,9 +8797,9 @@ export default function App() {
           const backVideoFrames = await captureVideoFromSource('environment', durationMs);
           newImages.push(...frontVideoFrames, ...backVideoFrames);
         } else {
-          // Smart Capture: "The Dance" (Dual standard sequence)
+          // Smart Capture: "The Dance" (Dual standard sequence) - completed super fast under 2 seconds!
           const front = await captureFromSource('user');
-          await new Promise(r => setTimeout(r, 300)); 
+          await new Promise(r => setTimeout(r, 50)); 
           const back = await captureFromSource('environment');
           if (front) newImages.push(front);
           if (back) newImages.push(back);
@@ -8796,29 +8861,12 @@ export default function App() {
 
   const requestCameraPermission = (): Promise<boolean> => {
     return new Promise((resolve) => {
-      // Check if hardware access is already active
-      if (cameraPermitted && videoRef.current?.srcObject) {
+      // Check if persistent permission flag is true
+      const savedPermit = localStorage.getItem('camera_permitted') === 'true';
+      if (savedPermit) {
+        setCameraPermitted(true);
         resolve(true);
         return;
-      }
-      
-      // Check for persistent permission flag
-      const savedPermit = localStorage.getItem('camera_permitted') === 'true';
-      if (savedPermit && !cameraPermitted) {
-         // Attempt to re-initialize hardware silently if previously permitted
-         navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
-            if (videoRef.current) {
-              videoRef.current.srcObject = stream;
-              videoRef.current.play().catch(() => {});
-            }
-            setCameraPermitted(true);
-            resolve(true);
-         }).catch(() => {
-            // Silent refresh failed, fallback to modal
-            setPermissionResolve(() => resolve);
-            setShowPermissionModal(true);
-         });
-         return;
       }
       
       if (cameraPermitted) {
@@ -8835,13 +8883,9 @@ export default function App() {
     setShowPermissionModal(false);
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        // Just verify/request permission, then immediately turn off the stream to extinguish the green dot
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        
-        // Keep the stream alive in the hidden video element for instant capture later
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(e => console.warn("Hidden video play error:", e));
-        }
+        stream.getTracks().forEach(track => track.stop());
 
         localStorage.setItem('camera_permitted', 'true');
         setCameraPermitted(true);

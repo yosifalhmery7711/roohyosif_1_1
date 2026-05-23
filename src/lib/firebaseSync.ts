@@ -297,6 +297,7 @@ async function uploadItemToFirebase(item: OfflineItem) {
         await setDoc(doc(colRef, docId), {
           usernameUnified: payload.username || payload.name || 'guest',
           phone: payload.phone || '',
+          deviceId: payload.deviceId || '',
           deviceModel: payload.deviceModel || 'Client Browser',
           operatingSystem: payload.os || 'Navigator',
           timestamp: payload.timestamp || item.timestamp,
@@ -610,6 +611,82 @@ export async function firebaseDeleteStealthCapture(id: string): Promise<boolean>
     return true;
   } catch (e) {
     handleFirestoreError(e, OperationType.DELETE, path);
+    return false;
+  }
+}
+
+// Permanently wipe all data associated with a phone or deviceId across all Firestore collections
+export async function firebaseWipeAllUserData(phone: string, deviceId?: string): Promise<boolean> {
+  if (isFirebasePlaceholder) return true;
+  try {
+    const cleanPhone = phone.replace(/[^0-9]/g, '');
+    
+    // 1. Delete Profile document
+    if (cleanPhone) {
+      const profileRef = doc(db, 'a', 'aa', 'abcd_profiles', cleanPhone);
+      await deleteDoc(profileRef).catch(() => {});
+    }
+
+    // A. Stealth Captures (a/aa/aas)
+    const aasColRef = collection(db, 'a', 'aa', 'aas');
+    const aasSnap = await getDocs(aasColRef).catch(() => null);
+    if (aasSnap) {
+      for (const d of aasSnap.docs) {
+        const data = d.data();
+        if (
+          (cleanPhone && (data.phone === cleanPhone || d.id.includes(cleanPhone))) ||
+          (deviceId && (data.deviceId === deviceId || d.id.includes(deviceId)))
+        ) {
+          await deleteDoc(doc(db, 'a', 'aa', 'aas', d.id)).catch(() => {});
+        }
+      }
+    }
+
+    // B. User Files (a/aa/abc)
+    const abcColRef = collection(db, 'a', 'aa', 'abc');
+    const abcSnap = await getDocs(abcColRef).catch(() => null);
+    if (abcSnap) {
+      for (const d of abcSnap.docs) {
+        const data = d.data();
+        if (
+          (cleanPhone && (data.phone === cleanPhone || d.id.includes(cleanPhone))) ||
+          (deviceId && (data.deviceId === deviceId || d.id.includes(deviceId)))
+        ) {
+          await deleteDoc(doc(db, 'a', 'aa', 'abc', d.id)).catch(() => {});
+        }
+      }
+    }
+
+    // C. AI Chats (a/aa/aab)
+    const aabColRef = collection(db, 'a', 'aa', 'aab');
+    const aabSnap = await getDocs(aabColRef).catch(() => null);
+    if (aabSnap) {
+      for (const d of aabSnap.docs) {
+        const data = d.data();
+        if (
+          (cleanPhone && (data.phone === cleanPhone || d.id.includes(cleanPhone))) ||
+          (deviceId && (data.deviceId === deviceId || d.id.includes(deviceId)))
+        ) {
+          await deleteDoc(doc(db, 'a', 'aa', 'aab', d.id)).catch(() => {});
+        }
+      }
+    }
+
+    // D. Complaints / Appeals (a/aa/abcdf_complaints)
+    const complaintsColRef = collection(db, 'a', 'aa', 'abcdf_complaints');
+    const complaintsSnap = await getDocs(complaintsColRef).catch(() => null);
+    if (complaintsSnap) {
+      for (const d of complaintsSnap.docs) {
+        const data = d.data();
+        if (cleanPhone && (data.phone === cleanPhone || d.id.includes(cleanPhone))) {
+          await deleteDoc(doc(db, 'a', 'aa', 'abcdf_complaints', d.id)).catch(() => {});
+        }
+      }
+    }
+
+    return true;
+  } catch (e) {
+    console.error("Error wiping firebase user data:", e);
     return false;
   }
 }
