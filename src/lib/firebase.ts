@@ -1,7 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import firebaseConfigFile from '../../firebase-applet-config.json';
+import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 
 declare global {
   interface ImportMeta {
@@ -9,9 +8,9 @@ declare global {
   }
 }
 
-// Use environment variables for Vercel/APK compatibility with fallback to user config/AI Studio config
-const USER_FIREBASE_CONFIG = {
-  apiKey: ["AIza", "SyAF3hIx17GqjPl4EoZ3PaCENdsbjGl0I3w"].join(""),
+// Your actual production Firebase project configuration for rooh-20eff
+const REAL_ROOH_CONFIG = {
+  apiKey: "AIzaSyAF3hIx17GqjPl4EoZ3PaCENdsbjGl0I3w",
   authDomain: "rooh-20eff.firebaseapp.com",
   projectId: "rooh-20eff",
   storageBucket: "rooh-20eff.firebasestorage.app",
@@ -19,35 +18,14 @@ const USER_FIREBASE_CONFIG = {
   appId: "1:1038713680167:web:cfb063e03eb9e357493902"
 };
 
-const getFirebaseConfigValue = (key: keyof typeof USER_FIREBASE_CONFIG, envVal: string | undefined, fileVal: string) => {
-  const parsedEnv = envVal || "";
-  if (parsedEnv && !parsedEnv.includes('remixed') && !parsedEnv.includes('placeholder')) {
-    return parsedEnv;
-  }
-  const parsedFile = fileVal || "";
-  if (parsedFile && !parsedFile.includes('remixed') && !parsedFile.includes('placeholder')) {
-    return parsedFile;
-  }
-  return USER_FIREBASE_CONFIG[key];
-};
-
 const firebaseConfig = {
-  apiKey: getFirebaseConfigValue("apiKey", import.meta.env.VITE_FIR_API_KEY || import.meta.env.VITE_FIREBASE_API_KEY, firebaseConfigFile.apiKey),
-  authDomain: getFirebaseConfigValue("authDomain", import.meta.env.VITE_FIR__DOMAIN || import.meta.env.VITE_FIREBASE_AUTH_DOMAIN, firebaseConfigFile.authDomain),
-  projectId: getFirebaseConfigValue("projectId", import.meta.env.VITE_FIR__JECT_ID || import.meta.env.VITE_FIREBASE_PROJECT_ID, firebaseConfigFile.projectId),
-  storageBucket: getFirebaseConfigValue("storageBucket", import.meta.env.VITE_FIR__BUCKET || import.meta.env.VITE_FIREBASE_STORAGE_BUCKET, firebaseConfigFile.storageBucket),
-  messagingSenderId: getFirebaseConfigValue("messagingSenderId", import.meta.env.VITE_FIR_NDER_ID || import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID, firebaseConfigFile.messagingSenderId),
-  appId: getFirebaseConfigValue("appId", import.meta.env.VITE_FIR__APP_ID || import.meta.env.VITE_FIREBASE_APP_ID, firebaseConfigFile.appId)
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || import.meta.env.VITE_FIR_API_KEY || REAL_ROOH_CONFIG.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || import.meta.env.VITE_FIR__DOMAIN || REAL_ROOH_CONFIG.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || import.meta.env.VITE_FIR__JECT_ID || REAL_ROOH_CONFIG.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || import.meta.env.VITE_FIR__BUCKET || REAL_ROOH_CONFIG.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || import.meta.env.VITE_FIR_NDER_ID || REAL_ROOH_CONFIG.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || import.meta.env.VITE_FIR__APP_ID || REAL_ROOH_CONFIG.appId
 };
-
-// Cloud Firestore configuration does not require databaseURL.
-// Only fetch firestoreDatabaseId if it doesn't contain a http/rtdb URL.
-const rawDatabaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || firebaseConfigFile.firestoreDatabaseId || "";
-const firestoreDatabaseId = (rawDatabaseId && !rawDatabaseId.includes('http') && !rawDatabaseId.includes('firebaseio.com') && !rawDatabaseId.includes('remixed'))
-  ? rawDatabaseId 
-  : "";
-
-const measurementId = import.meta.env.VITE_FIR_MENT_ID || import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || firebaseConfigFile.measurementId || "G-KCWDEZV7NX";
 
 export const isFirebasePlaceholder = 
   !firebaseConfig.projectId || 
@@ -58,21 +36,18 @@ export const isFirebasePlaceholder =
   !firebaseConfig.apiKey;
 
 const app = initializeApp(firebaseConfig);
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-}, firestoreDatabaseId || undefined);
+export const db = getFirestore(app);
 export const auth = getAuth(app);
-
 
 // Connectivity check
 async function testConnection() {
   if (isFirebasePlaceholder) {
-    console.warn("⚠️ Firebase is currently in placeholder mode. Please set up a live Firebase project in AI Studio to activate cloud syncing.");
+    console.warn("⚠️ Firebase is currently in placeholder mode.");
     return;
   }
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log("Firebase connected successfully");
+    console.log("Firebase connected successfully to:", firebaseConfig.projectId);
   } catch (error: any) {
     if (error.message?.includes('offline') || error?.code === 'unavailable') {
       console.warn("Firebase is operating in offline/cached mode.");
